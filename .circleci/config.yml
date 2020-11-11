@@ -28,6 +28,11 @@ jobs:
       - checkout
       - run: make install-tox
       - run: tox -e py3
+  publish-to-gemfury:
+    executor: python
+    steps:
+      - checkout
+      - run: ci/publish
 
 workflows:
   version: 2
@@ -44,5 +49,15 @@ workflows:
                 - "3.8"
                 - "3.7"
           filters:
+            tags:
+              only: /^[0-9]+\.[0-9]+\.[0-9]+/
+      - publish-to-gemfury:
+          context: musekafka-publish
+          requires:
+            - lint
+            - test
+          filters:
+            branches:
+              ignore: /.*/
             tags:
               only: /^[0-9]+\.[0-9]+\.[0-9]+/
