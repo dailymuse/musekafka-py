@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+source .tox/dev/bin/activate
+
+if [ $# -gt 0 ]; then
+    # Allow devenv to be used as a shortcut to executing programs in the correct environment, in addition
+    # to sourcing directly.
+    exec "$@"
+fi

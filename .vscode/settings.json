@@ -1,0 +1,34 @@
+// Configures the vscode user workspace for this project only.
+// If you override this configuration, CI may fail when performing lint checks.
+{
+  // General editor settings
+  "editor.renderWhitespace": "all",
+  "editor.formatOnSave": true,
+  "search.followSymlinks": false,
+  "[python]": {
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": true
+    }
+  },
+  // Tox
+  "python.venvPath": "${workspaceFolder}/.tox",
+  "python.pythonPath": ".tox/dev/bin/python",
+  // Formatting
+  "python.formatting.provider": "black",
+  // Linting
+  "python.linting.enabled": true,
+  "python.linting.banditEnabled": true,
+  // Generally we do not care much about security issues
+  // in our tests, and bandit gets very noisy for tests.
+  "python.linting.banditArgs": ["--exclude", "${workspaceFolder}/tests"],
+  "python.linting.flake8Enabled": true,
+  "python.linting.mypyEnabled": true,
+  "python.linting.pydocstyleEnabled": true,
+  // No need to use pylint and flake8 together.
+  "python.linting.pylintEnabled": false,
+  // Testing
+  "python.testing.nosetestsEnabled": false,
+  // We use pytest only.
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false
+}

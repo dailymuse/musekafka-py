@@ -1,0 +1,7 @@
+[pydocstyle]
+inherit = false
+convention = google
+add_ignore = D100,D104
+# Stupid bug in pydocstyle requires this, or else it will
+# flag tests w/ pydoc errors.
+match = (.+\/)?src\/musekafka\/.+\.py

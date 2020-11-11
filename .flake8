@@ -1,0 +1,12 @@
+[flake8]
+exclude =
+    .circleci,
+    .eggs,
+    .git,
+    .tox,
+    .vscode,
+    __pycache__
+# Ignore W503 because it's non-pep8 compliant.
+ignore = W503
+max-complexity = 12
+max-line-length = 99

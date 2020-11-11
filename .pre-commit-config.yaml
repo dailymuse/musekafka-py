@@ -1,0 +1,53 @@
+minimum_pre_commit_version: 2.7.0
+default_stages: [commit, push]
+repos:
+    - repo: https://github.com/pre-commit/pre-commit-hooks
+      rev: v3.2.0
+      hooks:
+          - id: check-merge-conflict
+          - id: check-yaml
+          - id: check-toml
+          - id: debug-statements
+          - id: end-of-file-fixer
+          - id: trailing-whitespace
+          - id: mixed-line-ending
+          - id: requirements-txt-fixer
+    - repo: local
+      hooks:
+          - id: isort
+            name: Sort imports
+            entry: ./devenv isort
+            language: system
+            types: [python]
+          - id: black
+            name: Format code
+            entry: ./devenv black
+            language: system
+            types: [python]
+          - id: pydocstyle
+            name: Check docstring style
+            entry: ./devenv pydocstyle
+            language: system
+            types: [python]
+          - id: bandit
+            name: Run security analysis
+            entry: ./devenv bandit
+            exclude: tests/.*.py
+            language: system
+            types: [python]
+          - id: flake8
+            name: Run linters
+            entry: ./devenv flake8
+            language: system
+            types: [python]
+          - id: mypy
+            name: Check types
+            entry: ./devenv mypy
+            language: system
+            types: [python]
+          - id: pytest
+            name: Execute tests
+            entry: ./devenv pytest
+            files: tests/.*.py
+            language: system
+            types: [python]
