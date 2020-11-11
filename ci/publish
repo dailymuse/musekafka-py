@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+set -e
+
+pip3 install wheel twine
+
+# create source distribution and build pure python wheel
+python3 setup.py sdist bdist_wheel
+
+twine upload dist/* --repository-url https://push.fury.io/themuse -p ""
