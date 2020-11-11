@@ -6,3 +6,8 @@ line-length = 99
 profile = "black"
 src_paths = "setup.py,src/musekafka,tests"
 line_length = 99
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::DeprecationWarning"
+]
