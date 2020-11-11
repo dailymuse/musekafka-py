@@ -1,0 +1,48 @@
+version: 2.1
+executors:
+  python:
+    parameters:
+      version:
+        description: "version tag"
+        default: "3.8"
+        type: string
+    docker:
+      - image: circleci/python:<<parameters.version>>
+jobs:
+  lint:
+    executor: python
+    steps:
+      - checkout
+      - run: make install-tox
+      - run: make dev
+      - run: make lint
+  test:
+    parameters:
+      version:
+        description: "version tag"
+        type: string
+    executor:
+      name: python
+      version: <<parameters.version>>
+    steps:
+      - checkout
+      - run: make install-tox
+      - run: tox -e py3
+
+workflows:
+  version: 2
+  primary:
+    jobs:
+      - lint:
+          filters:
+            tags:
+              only: /^[0-9]+\.[0-9]+\.[0-9]+/
+      - test:
+          matrix:
+            parameters:
+              version:
+                - "3.8"
+                - "3.7"
+          filters:
+            tags:
+              only: /^[0-9]+\.[0-9]+\.[0-9]+/
