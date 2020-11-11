@@ -1,0 +1,12 @@
+{
+  "recommendations": [
+    // Python support. Highly recommended.
+    "ms-python.python",
+    // Indent / formatting settings.
+    "EditorConfig.editorconfig",
+    // Generate python method docstrings.
+    "njpwerner.autodocstring",
+    // Easy access to Makefile commands.
+    "spmeesseman.vscode-taskexplorer"
+  ]
+}
