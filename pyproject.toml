@@ -1,0 +1,8 @@
+
+[tool.black]
+line-length = 99
+
+[tool.isort]
+profile = "black"
+src_paths = "setup.py,src/musekafka,tests"
+line_length = 99

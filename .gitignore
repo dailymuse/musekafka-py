@@ -127,3 +127,9 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# SCM-based versioning
+src/musekafka/_version.py
+
+# OSX
+.DS_Store
