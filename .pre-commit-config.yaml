@@ -32,7 +32,7 @@ repos:
           - id: bandit
             name: Run security analysis
             entry: ./devenv bandit
-            exclude: tests/.*.py
+            exclude: tests/.*\.py
             language: system
             types: [python]
           - id: flake8
@@ -43,11 +43,13 @@ repos:
           - id: mypy
             name: Check types
             entry: ./devenv mypy
+            exclude: tests/.*\.py
             language: system
             types: [python]
           - id: pytest
-            name: Execute tests
-            entry: ./devenv pytest
-            files: tests/.*.py
+            name: Execute unit tests
+            entry: make unit-test
+            files: src/musekafka/.*\.py
+            pass_filenames: false
             language: system
             types: [python]

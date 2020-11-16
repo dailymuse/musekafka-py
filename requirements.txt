@@ -1,7 +1,10 @@
+--extra-index-url https://pypi.fury.io/themuse/
 bandit
 black
 flake8
 isort
+muselog
 mypy
 pydocstyle
 pytest
+pytest-docker

@@ -1,35 +1,30 @@
 version: 2.1
 executors:
-  python:
-    parameters:
-      version:
-        description: "version tag"
-        default: "3.8"
-        type: string
-    docker:
-      - image: circleci/python:<<parameters.version>>
+  ubuntu:
+    machine:
+      image: ubuntu-2004:202010-01
 jobs:
   lint:
-    executor: python
+    executor: ubuntu
     steps:
       - checkout
       - run: make install-tox
       - run: make dev
       - run: make lint
   test:
-    parameters:
-      version:
-        description: "version tag"
-        type: string
-    executor:
-      name: python
-      version: <<parameters.version>>
+    executor: ubuntu
     steps:
       - checkout
-      - run: make install-tox
-      - run: tox -e py3
+      # virtualenv is broken on ubuntu if using liblzma and a few others (zlib, I belive)
+      # Since we only need to support python 3.8 at the moment, I am going to run CI tests outside of
+      # tox. This is not a permanent solution.
+      #- run: make install-tox
+      #- run: tox -e py38
+      - run: sudo pip3 install -r requirements.txt
+      - run: sudo pip3 install .
+      - run: pytest
   publish-to-gemfury:
-    executor: python
+    executor: ubuntu
     steps:
       - checkout
       - run: ci/publish
@@ -43,11 +38,6 @@ workflows:
             tags:
               only: /^[0-9]+\.[0-9]+\.[0-9]+/
       - test:
-          matrix:
-            parameters:
-              version:
-                - "3.8"
-                - "3.7"
           filters:
             tags:
               only: /^[0-9]+\.[0-9]+\.[0-9]+/
