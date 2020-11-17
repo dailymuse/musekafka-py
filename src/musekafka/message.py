@@ -3,7 +3,7 @@
 import logging
 from contextlib import contextmanager
 from datetime import datetime, timedelta
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Iterator, List, Optional
 
 import muselog.context
 from confluent_kafka import Consumer, Message
@@ -29,11 +29,43 @@ def batch(
     poll_timeout: Optional[float] = DEFAULT_POLL_TIMEOUT,
     timeout: Optional[float] = None,
 ) -> Iterator[List[Message]]:
-    """Stream batches of messages."""
+    """Stream batches of messages.
+
+    Args:
+        consumer (Consumer): Consumer that provides the messages.
+        batch_count (Optional[int], optional): Number of batches to stream.
+            If `None`, stream forever or until timeout.
+            Defaults to None.
+        batch_size (int, optional): Number of messages in a batch.
+            Defaults to DEFAULT_BATCH_SIZE.
+        batch_timeout (Optional[float], optional): Seconds to accumulate a batch of messages.
+            Defaults to DEFAULT_BATCH_TIMEOUT.
+        poll_timeout (Optional[float], optional): Seconds to block on polling of a single message.
+            If `None`, block indefinitely.
+            Defaults to DEFAULT_POLL_TIMEOUT.
+        timeout (Optional[float], optional): Cumulative seconds to block fetching messages before
+            exiting.
+            If `None`, never exit (unless batch_count is specified).
+            Defaults to None.
+
+    Raises:
+        ValueError: If batch_count is not positive.
+        ValueError: If batch_size is not positive.
+        ValueError: If batch_timeout is not positive.
+        ValueError: If poll_timeout is not positive.
+        ValueError: If timeout is not positive.
+
+    Yields:
+        List[Message]: A batch of messages.
+    """
     if batch_count is not None and batch_count <= 0:
         raise ValueError("batch_count must be a positive integer.")
     if batch_size <= 0:
         raise ValueError("batch_size must be a positive integer.")
+    if batch_timeout is not None and batch_timeout <= 0:
+        raise ValueError("batch_timeout must be a positive float.")
+    if poll_timeout is not None and poll_timeout <= 0:
+        raise ValueError("poll_timeout must be a positive float.")
     if timeout is not None and timeout <= 0:
         raise ValueError("timeout must be a positive float.")
 
@@ -85,9 +117,33 @@ def stream(
     poll_timeout: Optional[float] = DEFAULT_POLL_TIMEOUT,
     timeout: Optional[float] = None,
 ) -> Iterator[Message]:
-    """Stream `count` messages from the consumer."""
+    """Stream `count` messages from the consumer.
+
+    Args:
+        consumer (Consumer): Consumer that provides the messages.
+        count (Optional[int], optional): Number of messages to consume before exiting.
+            If `None`, stream will continue polling messages forever or until timeout.
+            Defaults to None.
+        poll_timeout (Optional[float], optional): Seconds to block on polling of a single message.
+            If `None`, block indefinitely.
+            Defaults to DEFAULT_POLL_TIMEOUT.
+        timeout (Optional[float], optional): Cumulative seconds to block fetching messages before
+            exiting.
+            If `None`, never exit (unless count is specified).
+            Defaults to None.
+
+    Raises:
+        ValueError: If count is not positive.
+        ValueError: If poll_timeout is not positive.
+        ValueError: If timeout is not positive.
+
+    Yields:
+        Message: A Kafka message from the message stream.
+    """
     if count is not None and count <= 0:
         raise ValueError("count must be a positive integer.")
+    if poll_timeout is not None and poll_timeout <= 0:
+        raise ValueError("poll_timeout must be a positive float.")
     if timeout is not None and timeout <= 0:
         raise ValueError("timeout must be a positive float.")
 
@@ -121,12 +177,7 @@ def stream(
             continue
         finally:
             stream_duration += datetime.utcnow() - stream_start
-        ctx = dict(
-            kafka_topic=message.topic(),
-            kafka_partition=message.partition(),
-            kafka_offset=message.offset(),
-        )
-        with _bind_ctx(ctx):
+        with bind_message_ctx(message):
             yield message
         num_messages += 1
     LOGGER.debug("Completed streaming %d messages.", num_messages)
@@ -138,6 +189,19 @@ def poll(consumer: Consumer, timeout: Optional[float] = DEFAULT_POLL_TIMEOUT) ->
     This method differs from consumer.poll in that it will never return a null message
     or a message that has an error. If you set timeout and poll hits that timeout,
     it will raise a TimeoutError.
+
+    Args:
+        consumer (Consumer): Consumer that polls for messages.
+        timeout (Optional[float], optional): Seconds to wait for a message before giving up.
+            If `None`, block indefinitely.
+            Defaults to DEFAULT_POLL_TIMEOUT.
+
+    Raises:
+        TimeoutError: If no messages are retrieved in the specified timeout.
+        ValueError: If timeout is not positive.
+
+    Returns:
+        Message: A Kafka message.
     """
     if timeout is not None and timeout <= 0:
         raise ValueError("timeout must be a positive integer.")
@@ -158,30 +222,36 @@ def poll(consumer: Consumer, timeout: Optional[float] = DEFAULT_POLL_TIMEOUT) ->
         if message is None:
             continue
 
-        topic = message.topic()
-        partition = message.partition()
-        offset = message.offset()
+        with bind_message_ctx(message):
+            LOGGER.debug(
+                "Received message -- topic=%s partition=%s offset=%s",
+                message.topic(),
+                message.partition(),
+                message.offset(),
+            )
 
-        LOGGER.debug(
-            "Received message -- topic=%s partition=%s offset=%s",
-            topic,
-            partition,
-            offset,
-            kafka_topic=topic,
-            kafka_partition=partition,
-            kafka_offset=offset,
-        )
-
-        if message.error():
-            # If we cannot read the raw message correctly, we give up and
-            # raise the error to the caller.
-            raise ConsumerException(f"Got bad message from Kafka: {message.error()}")
+            if message.error():
+                # If we cannot read the raw message correctly, we give up and
+                # raise the error to the caller.
+                raise ConsumerException(f"Got bad message from Kafka: {message.error()}")
 
         return message
 
 
 @contextmanager
-def _bind_ctx(ctx: Dict[str, Any]) -> Iterator[None]:
+def bind_message_ctx(message: Message, **additional_ctx) -> Iterator[None]:
+    """Add kafka message context to muselog logs.
+
+    Args:
+        message (Message): The Kafka Message.
+        additional_ctx: Any additional context you wish to bind.
+    """
+    ctx = dict(
+        kafka_topic=message.topic(),
+        kafka_partition=message.partition(),
+        kafka_offset=message.offset(),
+    )
+    ctx.update(additional_ctx)
     muselog.context.bind(**ctx)
     try:
         yield

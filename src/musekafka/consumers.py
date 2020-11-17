@@ -3,6 +3,7 @@ import logging
 import sys
 from typing import Any, Callable, Dict, Iterator, List, Optional, Type, TypeVar, Union
 
+import muselog.context
 from confluent_kafka import Consumer, Message, TopicPartition
 from confluent_kafka.avro import AvroConsumer
 from muselog.logger import get_logger_with_context
@@ -105,6 +106,10 @@ class App:
                 Defaults to DEFAULT_CONSUMER_CONFIG.
             extra_consumer_kwargs: Additional keyword arguments to pass to the underlying
                 consumer instance.
+
+        Raises:
+            ValueError: If consumer_cls is an AvroConsumer subclass and schema_registry_url is
+                `None`.
         """
         if issubclass(consumer_cls, AvroConsumer) and not schema_registry_url:
             raise ValueError("AvroConsumer and its subclasses require a schema registry url.")
@@ -180,47 +185,61 @@ class App:
         Yields:
             Iterator[MessageProviderResultT]: Consumed message(s) that are ready to be processed.
         """
-        if not self._subscribed:
-            try:
-                subscribe_kwargs = dict()
-                if self.on_assign is not None:
-                    subscribe_kwargs["on_assign"] = self.on_assign
-                if self.on_revoke is not None:
-                    subscribe_kwargs["on_revoke"] = self.on_revoke
-                self.consumer.subscribe(self.topics, **subscribe_kwargs)
-            except Exception as e:
-                LOGGER.exception(str(e))
-                sys.exit("Consumer subscription failed.")
-            else:
-                self._subscribed = True
-
-        try:
-            messages = message_provider(self.consumer, **kwargs)
-
-            def _msg_iterator() -> Iterator[MessageProviderResultT]:
-                for msg_or_batch in messages:
-                    yield msg_or_batch
-                    if self.commit_strategy is not None:
-                        self.commit_strategy(self.consumer, msg_or_batch)
-                    if musekafka.shutdown.is_shutting_down():
-                        break
-
-            yield _msg_iterator()
-        except Exception as e:
-            LOGGER.exception(str(e))
-            sys.exit("Consumption failed.")
-        finally:
-            if close:
-                LOGGER.info("Closing consumer. This may take a moment....")
+        with self._bind_consumer_group_id():
+            if not self._subscribed:
                 try:
-                    self.close()
+                    subscribe_kwargs = dict()
+                    if self.on_assign is not None:
+                        subscribe_kwargs["on_assign"] = self.on_assign
+                    if self.on_revoke is not None:
+                        subscribe_kwargs["on_revoke"] = self.on_revoke
+                    self.consumer.subscribe(self.topics, **subscribe_kwargs)
                 except Exception as e:
                     LOGGER.exception(str(e))
-                    sys.exit("Unable to cleanly shutdown the consumer.")
-                LOGGER.info("Goodbye.")
-            else:
-                # If we do not close the consumer, we need to re-subscribe
-                # to reset our position, otherwise subsequent calls to 'poll'
-                # may skip messages.
-                self.consumer.unsubscribe()
-                self._subscribed = False
+                    sys.exit("Consumer subscription failed.")
+                else:
+                    self._subscribed = True
+
+            try:
+                messages: Iterator[MessageProviderResultT] = message_provider(
+                    self.consumer, **kwargs
+                )
+
+                def _msg_iterator() -> Iterator[MessageProviderResultT]:
+                    for msg_or_batch in messages:
+                        yield msg_or_batch
+                        if self.commit_strategy is not None:
+                            self.commit_strategy(self.consumer, msg_or_batch)
+                        if musekafka.shutdown.is_shutting_down():
+                            break
+
+                yield _msg_iterator()
+            except Exception as e:
+                LOGGER.exception(str(e))
+                sys.exit("Consumption failed.")
+            finally:
+                if close:
+                    LOGGER.info("Closing consumer. This may take a moment....")
+                    try:
+                        self.close()
+                    except Exception as e:
+                        LOGGER.exception(str(e))
+                        sys.exit("Unable to cleanly shutdown the consumer.")
+                    LOGGER.info("Goodbye.")
+                else:
+                    # If we do not close the consumer, we need to re-subscribe
+                    # to reset our position, otherwise subsequent calls to 'poll'
+                    # may skip messages.
+                    self.consumer.unsubscribe()
+                    self._subscribed = False
+
+    @contextlib.contextmanager
+    def _bind_consumer_group_id(self) -> Iterator[None]:
+        muselog.context.bind(kafka_consumer_group_id=self.name)
+        try:
+            yield
+        finally:
+            # Clear only our context.
+            # This will clear the `ctx` keys even if their values have been overwritten
+            # by our yieldee.
+            muselog.context.unbind("kafka_consumer_group_id")
