@@ -8,5 +8,5 @@ exclude =
     __pycache__
 # Ignore W503 because it's non-pep8 compliant.
 ignore = W503
-max-complexity = 12
+max-complexity = 13
 max-line-length = 99
