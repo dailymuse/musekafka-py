@@ -43,7 +43,7 @@ repos:
           - id: mypy
             name: Check types
             entry: ./devenv mypy
-            exclude: tests/.*\.py
+            exclude: (tests|examples)/.*\.py
             language: system
             types: [python]
           - id: pytest

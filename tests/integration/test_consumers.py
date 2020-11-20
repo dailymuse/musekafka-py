@@ -1,13 +1,14 @@
 from typing import Iterator, List
 
 import pytest
-from confluent_kafka import SerializingProducer
+from confluent_kafka import OFFSET_BEGINNING, SerializingProducer, TopicPartition
 from confluent_kafka.admin import AdminClient, NewTopic
 from confluent_kafka.avro import AvroConsumer
 from confluent_kafka.schema_registry import SchemaRegistryClient
 from confluent_kafka.schema_registry.avro import AvroSerializer
 
 from musekafka import consumers
+from musekafka.message import stream as message_stream
 
 GOOD_SCHEMA = """
 {
@@ -23,6 +24,10 @@ GOOD_SCHEMA = """
   ]
 }
 """
+
+
+class Goofed(Exception):
+    """Marker exception to assert test success."""
 
 
 @pytest.fixture(scope="module")
@@ -57,139 +62,253 @@ def topics(
             registry.delete_subject(subj)
 
 
+@pytest.fixture(scope="module")
+def messages(producer: SerializingProducer, topics: List[str]) -> List[dict]:
+    test_messages = [{"test": f"TESTING!{i}"} for i in range(4)]
+    test_messages.append({"test": "FAIL."})
+    test_messages.extend([{"test": f"TESTING AFTER!{i}"} for i in range(4)])
+    for topic in topics:
+        for message in test_messages:
+            producer.produce(topic, value=message)
+    return test_messages
+
+
 @pytest.fixture
-def app(broker_host: str, registry_url: str, topics: List[str]) -> Iterator[consumers.App]:
+def app(broker_host: str, registry_url: str, topics: List[str]) -> consumers.App:
     consumer_app = consumers.App(
         "testconsumers",
         [broker_host],
         topics,
         consumer_cls=AvroConsumer,
         schema_registry_url=registry_url,
+        app_mode=False,
+        from_beginning=True,
+        close_after_consume=False,
+        timeout=10,
     )
     yield consumer_app
     consumer_app.close()
 
 
-def test_app_stream(app: consumers.App, producer: SerializingProducer, topics: List[str]):
+def test_app_stream(app: consumers.App, messages: List[dict]):
     """App.stream consumes all data up to count."""
-    for topic in topics:
-        producer.produce(topic, value={"test": "TESTING!1"})
-        producer.produce(topic, value={"test": "TESTING!2"})
-        # Expect default to kick in.
-        producer.produce(topic, value={})
+    with app.stream(count=len(messages)) as stream:
+        actual_messages = [msg.value() for msg in stream]
 
-    with app.stream(count=3) as stream:
-        messages = list(stream)
-
-    assert len(messages) == 3
-    assert messages[0].value() == {"test": "TESTING!1"}
-    assert messages[1].value() == {"test": "TESTING!2"}
-    assert messages[2].value() == {"test": None}
+    assert actual_messages == messages
 
 
-def test_app_batch(app: consumers.App, producer: SerializingProducer, topics: List[str]):
+def test_app_batch(app: consumers.App, messages: List[dict]):
     """App.batch consumes a batch of messages."""
-    for topic in topics:
-        for i in range(4):
-            producer.produce(topic, value={"test": f"TESTING!{i}"})
+    with app.batch(batch_size=2, batch_count=2) as batches:
+        first_batch, second_batch = list(batches)
 
-    with app.batch(batch_size=2, batch_count=2) as batch:
-        first_batch, second_batch = list(batch)
-
-    assert [m.value() for m in first_batch] == [{"test": "TESTING!0"}, {"test": "TESTING!1"}]
-    assert [m.value() for m in second_batch] == [{"test": "TESTING!2"}, {"test": "TESTING!3"}]
+    assert [m.value() for m in first_batch] == messages[:2]
+    assert [m.value() for m in second_batch] == messages[2:4]
 
 
-def test_app_stream_fail(app: consumers.App, producer: SerializingProducer, topics: List[str]):
+def test_app_stream_fail(app: consumers.App, messages: List[dict]):
     """App.stream exits on exception, and does not commit offsets."""
-    expected_messages_pre = [{"test": f"TESTING!{i}"} for i in range(4)]
-    fail_message = {"test": "FAIL."}
-    expected_messages_post = [{"test": f"TESTING AFTER!{i}"} for i in range(4)]
-    for topic in topics:
-        for message in expected_messages_pre:
-            producer.produce(topic, value=message)
-        # BAD MESSAGE
-        producer.produce(topic, value=fail_message)
-        # We should not consume these messages until
-        # the final call to stream that does not result in an exception.
-        for message in expected_messages_post:
-            producer.produce(topic, value=message)
-
     actual_messages = []
-    with pytest.raises(SystemExit):
-        with app.stream(close=False, timeout=5) as stream:
+    with pytest.raises(Goofed):
+        with app.stream() as stream:
             for msg in stream:
                 if msg.value()["test"] == "FAIL.":
-                    raise Exception("Dun goofed.")
+                    raise Goofed("Dun goofed.")
                 actual_messages.append(msg.value())
 
     # Only got the first four messages before we enocuntered an error.
-    assert actual_messages == expected_messages_pre
+    fail_msg_idx = messages.index({"test": "FAIL."})
+    assert actual_messages == messages[:fail_msg_idx]
 
-    with pytest.raises(SystemExit):
-        with app.stream(close=False, timeout=5) as stream:
+    with pytest.raises(Goofed):
+        with app.stream() as stream:
             for msg in stream:
                 if msg.value()["test"] == "FAIL.":
-                    raise Exception("Dun goofed.")
+                    raise Goofed("Dun goofed.")
                 actual_messages.append(msg.value())
 
     # Should not have received any additional messages.
-    assert actual_messages == expected_messages_pre
+    assert actual_messages == messages[:fail_msg_idx]
 
     # Let's just consume the remaining messages to check that
     # we do consume everything.
-    with app.stream(count=len(expected_messages_post) + 1, timeout=5) as stream:
+    with app.stream(count=len(messages[fail_msg_idx:]) + 1) as stream:
         for msg in stream:
             actual_messages.append(msg.value())
 
-    assert actual_messages == expected_messages_pre + [fail_message] + expected_messages_post
+    assert actual_messages == messages
 
 
-def test_app_batch_fail(app: consumers.App, producer: SerializingProducer, topics: List[str]):
+def test_app_batch_fail(app: consumers.App, messages: List[dict]):
     """App.batch exits on exception, and does not commit offsets."""
-    expected_messages_pre = [{"test": f"TESTING!{i}"} for i in range(4)]
-    fail_message = {"test": "FAIL."}
-    expected_messages_post = [{"test": f"TESTING AFTER!{i}"} for i in range(4)]
-    for topic in topics:
-        for message in expected_messages_pre:
-            producer.produce(topic, value=message)
-        # BAD MESSAGE
-        producer.produce(topic, value=fail_message)
-        # We should not consume these messages until
-        # the final call to stream that does not result in an exception.
-        for message in expected_messages_post:
-            producer.produce(topic, value=message)
-
     actual_messages = []
-    with pytest.raises(SystemExit):
-        with app.batch(close=False, batch_size=4, timeout=5) as batch:
+    with pytest.raises(Goofed):
+        with app.batch(batch_size=4) as batch:
             for msgs in batch:
                 for msg in msgs:
                     if msg.value()["test"] == "FAIL.":
-                        raise Exception("Dun goofed.")
+                        raise Goofed("Dun goofed.")
                     actual_messages.append(msg.value())
 
     # Only got the first four messages before we enocuntered an error.
-    assert actual_messages == expected_messages_pre
+    fail_msg_idx = messages.index({"test": "FAIL."})
+    assert actual_messages == messages[:fail_msg_idx]
 
-    with pytest.raises(SystemExit):
-        with app.batch(close=False, batch_size=4, timeout=5) as batch:
+    with pytest.raises(Goofed):
+        with app.batch(batch_size=4) as batch:
             for msgs in batch:
                 for msg in msgs:
                     if msg.value()["test"] == "FAIL.":
-                        raise Exception("Dun goofed.")
+                        raise Goofed("Dun goofed.")
                     actual_messages.append(msg.value())
 
     # Should not have received any additional messages.
-    assert actual_messages == expected_messages_pre
+    assert actual_messages == messages[:fail_msg_idx]
 
     # Let's just consume the remaining messages to check that
     # we do consume everything.
-    with app.batch(
-        close=False, batch_size=1, batch_count=len(expected_messages_post) + 1, timeout=5
-    ) as batch:
+    with app.batch(batch_size=1, batch_count=len(messages[fail_msg_idx:]) + 1) as batch:
         for msgs in batch:
             for msg in msgs:
                 actual_messages.append(msg.value())
 
-    assert actual_messages == expected_messages_pre + [fail_message] + expected_messages_post
+    assert actual_messages == messages
+
+
+def test_app_consume_from_end(
+    app: consumers.App, topics: List[str], producer: SerializingProducer, messages: List[dict]
+):
+    """App.consume consumes from the tail end of the topic on first startup."""
+    app.from_beginning = False
+    actual_messages = []
+
+    with app.consume(message_stream, timeout=0.5) as msgs:
+        actual_messages.extend(msgs)
+
+    # Will not have consumed anything, since we are tailing.
+    assert not actual_messages
+
+    # Now we add an additional message. We should consume it.
+    for topic in topics:
+        producer.produce(topic, value={"test": "An additional message!"})
+
+    with app.consume(message_stream, count=1) as msgs:
+        actual_messages.extend([msg.value() for msg in msgs])
+
+    assert actual_messages == [{"test": "An additional message!"}]
+
+
+def test_app_consume_topic_partitions(app: consumers.App, topics: List[str], messages: List[dict]):
+    """App.consume consumes starting from the given topic partitions."""
+    offset = len(messages) - 3
+    app.from_beginning = False
+    app.topic_partitions = [TopicPartition(topic, 0, offset) for topic in topics]
+
+    expected_messages = messages[offset:]
+    actual_messages = []
+
+    with app.consume(message_stream, count=len(expected_messages)) as msgs:
+        actual_messages.extend([msg.value() for msg in msgs])
+
+    assert actual_messages == expected_messages
+
+
+def test_app_mode(app: consumers.App):
+    """App.consume raises SystemExit in app mode."""
+    app.app_mode = True
+    with pytest.raises(SystemExit):
+        with app.consume(message_stream, count=1) as msgs:
+            list(msgs)
+
+
+def test_app_mode_exception(app: consumers.App, messages: List[dict]):
+    """App.consume raises SystemExit in app mode if an underlying exception occurs."""
+    app.app_mode = True
+    with pytest.raises(SystemExit):
+        with app.consume(message_stream, count=len(messages)) as msgs:
+            for msg in msgs:
+                if msg.value()["test"] == "FAIL.":
+                    raise Goofed("Dun goofed.")
+
+
+def test_app_start_for_assign(app: consumers.App):
+    """App.start assigns the consumer."""
+    app.start()
+    assert app.started
+    assert len(app.consumer.assignment()) == 1
+
+
+def test_app_start_for_subscribe(
+    app: consumers.App, topics: List[str], producer: SerializingProducer
+):
+    """App.start subscribes the consumer."""
+
+    def on_assign(consumer, _partitions):
+        for topic in topics:
+            producer.produce(topic, value={"test": "Assigned."})
+
+    app.from_beginning = False
+    # on_assign is only called for subscribe, so this is a good
+    # check that we subscribed rather than made an explicit assignment.
+    app.on_assign = on_assign
+    app.start()
+    assert app.started, "consumer not started."
+
+    success = False
+    for msg in message_stream(app.consumer, timeout=20):
+        if msg.value()["test"] == "Assigned.":
+            success = True
+            break
+    assert success, "consumer not assigned."
+
+
+def test_app_stop_for_assign(app: consumers.App):
+    """App.stop unassigns the consumer."""
+    # Need to start consumer for stop to have any impact.
+    app.start()
+    # assign will block, so we can immediately call stop.
+    app.stop()
+    assert not app.started, "app is still running."
+    assert not app.consumer.assignment(), "consumer still has an assignment"
+
+
+def test_app_stop_for_subscribe(
+    app: consumers.App, topics: List[str], producer: SerializingProducer
+):
+    """App.stop unassigns the consumer."""
+    subscribed = False
+    # Need to start consumer for stop to have any impact.
+
+    def on_assign(_consumer, _partitions):
+        nonlocal subscribed
+        subscribed = True
+        for topic in topics:
+            producer.produce(topic, value={"test": "Assigned."})
+
+    def on_revoke(consumer, partitions):
+        for topic in topics:
+            consumer.assign([TopicPartition(topic, 0, OFFSET_BEGINNING)])
+            producer.produce(topic, value={"test": "Revoked."})
+
+    # setting from_beginning to False will put us in subscribe mode.
+    app.from_beginning = False
+    app.on_assign = on_assign
+    app.on_revoke = on_revoke
+    app.start()
+
+    for msg in message_stream(app.consumer, timeout=20):
+        # Don't really care which message we get. Just need something.
+        break
+    assert subscribed, "consumer never got subscribed."
+
+    app.stop()
+    assert not app.started, "app is still running."
+
+    for msg in message_stream(app.consumer, timeout=20):
+        # Don't really care which message we get. Just need something.
+        if msg.value() == {"test": "Revoked."}:
+            subscribed = False
+            break
+
+    assert not subscribed, "consumer is still subscribed."

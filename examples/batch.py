@@ -20,6 +20,7 @@ The consumer should output something similar to the following:
 
 import logging
 
+import docker
 import muselog
 from muselog.logger import get_logger_with_context
 
@@ -27,9 +28,16 @@ from musekafka import consumers
 
 muselog.setup_logging(root_log_level="INFO", module_log_levels={"musekafka": "DEBUG"})
 
+docker_client = docker.from_env()
+brokers = [
+    f"localhost:{host['HostPort']}"
+    for host in docker_client.api.port("musekafka-py_kafka_1", 9092)
+]
+
 LOGGER = get_logger_with_context(logging.getLogger(__name__))
 
-app = consumers.App("batch_example", ["localhost:9092"], ["batch_example"])
+app = consumers.App("batch_example", brokers, ["batch_example"])
+
 with app.batch(batch_size=3, batch_timeout=5) as batch:
     for messages in batch:
         LOGGER.info("My batch size: %d", len(messages))

@@ -1,6 +1,7 @@
 --extra-index-url https://pypi.fury.io/themuse/
 bandit
 black
+docker
 flake8
 isort
 muselog
