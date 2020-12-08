@@ -13,7 +13,7 @@ services:
       KAFKA_LISTENERS: INSIDE://:9093,OUTSIDE://:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INSIDE:PLAINTEXT,OUTSIDE:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: INSIDE
-      KAFKA_CREATE_TOPICS: "registry_schemas:1:1,stream_example:1:1,batch_example:1:1"
+      KAFKA_CREATE_TOPICS: "registry_schemas:1:1,stream_example:1:1,batch_example:1:1,develop:1:1"
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
     ports:
       - 9092
@@ -33,5 +33,4 @@ services:
     ports:
       - 8081
     depends_on:
-      - zookeeper
       - kafka
