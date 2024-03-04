@@ -177,7 +177,7 @@ class App:
         self.close_after_consume = close_after_consume
         self.from_beginning = from_beginning
         self.topic_partitions = topic_partitions
-        self.timeout = timeout
+        self.timeout = timeout  # here
         self.started = False
         self._assigned_topic_partitions: List[TopicPartition] = []
 
