@@ -133,3 +133,4 @@ src/musekafka/_version.py
 
 # OSX
 .DS_Store
+.idea
