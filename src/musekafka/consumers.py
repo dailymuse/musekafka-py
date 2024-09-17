@@ -1,6 +1,8 @@
 import contextlib
 import logging
 import sys
+import uuid
+
 from typing import Any, Callable, Dict, Iterator, List, Optional, Type, TypeVar, Union
 
 import muselog.context
@@ -63,7 +65,8 @@ class App:
 
     def __init__(
         self,
-        name: str,
+        consumer_id: Optional[str],
+        consumer_group_id: str,
         brokers: List[str],
         topics: List[str],
         schema_registry_url: Optional[str] = None,
@@ -84,7 +87,8 @@ class App:
         """Create the consumer application.
 
         Args:
-            name (str): Consumer name. Must be unique, as it is used as the consumer's group id.
+            consumer_id Optional(str): Consumer name. Must be unique, as it is used as a consumer group cannot have multiple consumers with the same name
+            consumer_group_id (str): Consumer group id.
             brokers (List[str]): Kafka Broker hostnames.
             topics (List[str]): Topics to consume from.
             schema_registry_url (Optional[str], optional): URL for the schema registry,
@@ -155,7 +159,7 @@ class App:
             raise ValueError("AvroConsumer and its subclasses require a schema registry url.")
         if from_beginning and topic_partitions:
             raise ValueError("from_beginning and topic_partitions are mutually exclusive.")
-        self.name = name
+        self.name = consumer_id if consumer_id is not None else str(uuid.uuid4())
         self.topics = topics.copy()
         self.on_assign = on_assign
         self.on_revoke = on_revoke
@@ -166,7 +170,7 @@ class App:
             effective_consumer_config.update(DEFAULT_CONSUMER_CONFIG)
         elif consumer_cfg:
             effective_consumer_config.update(consumer_cfg)
-        effective_consumer_config["group.id"] = name
+        effective_consumer_config["group.id"] = consumer_group_id
         effective_consumer_config["bootstrap.servers"] = ",".join(brokers)
         if schema_registry_url is not None:
             effective_consumer_config["schema.registry.url"] = schema_registry_url
